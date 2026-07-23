@@ -16,6 +16,7 @@
     button:hover { background: #0e45af; } button:focus-visible { outline: 4px solid #9dc0ff; outline-offset: 3px; }
     .status { min-height: 58px; display: grid; place-items: center; padding: 12px 16px; background: var(--pale); border-radius: 14px; font-weight: 600; }
     .transcript { margin-top: 14px; text-align: left; padding: 16px; min-height: 90px; background: #fbfcff; border: 1px solid var(--line); border-radius: 14px; color: var(--muted); white-space: pre-wrap; }
+    form { display: flex; gap: 8px; margin-top: 12px; } input { min-width: 0; flex: 1; padding: 13px 14px; border: 1px solid var(--line); border-radius: 12px; font: inherit; } form button { width: auto; margin: 0; padding: 12px 16px; border-radius: 12px; font-size: 1rem; box-shadow: none; }
     .notice { margin-top: 18px; font-size: .82rem; }
     .log { display: none; margin-top: 18px; text-align: left; } .log summary { cursor: pointer; color: var(--blue); font-weight: 700; } .log ul { padding-left: 20px; color: var(--muted); }
   </style>
@@ -28,6 +29,7 @@
     <button id="talk" type="button">🎙 Start talking</button>
     <div id="status" class="status" aria-live="polite">Ready to welcome your visitor.</div>
     <div id="transcript" class="transcript" aria-live="polite">Your conversation will appear here.</div>
+    <form id="chat" aria-label="Type a message to reception"><input id="message" placeholder="Or type a message…" autocomplete="off"><button type="submit">Send</button></form>
     <p class="notice">This demo uses only your browser. Nothing is sent to a server or saved after you close the page.</p>
     <details id="log" class="log"><summary>Visitor notes for this session</summary><ul id="notes"></ul></details>
   </main>
@@ -35,10 +37,13 @@
     const talk = document.querySelector('#talk');
     const status = document.querySelector('#status');
     const transcript = document.querySelector('#transcript');
+    const chat = document.querySelector('#chat');
+    const message = document.querySelector('#message');
     const log = document.querySelector('#log');
     const notes = document.querySelector('#notes');
     const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     let recognition, listening = false;
+    const visitor = { name: '', host: '', purpose: '' };
 
     function say(text) {
       window.speechSynthesis.cancel();
@@ -46,20 +51,40 @@
       speech.lang = 'en-GB'; speech.rate = .97;
       window.speechSynthesis.speak(speech);
     }
-    function reply(message) {
-      const clean = message.trim();
+    function respond(text) {
+      transcript.textContent += '\n\nReception: ' + text;
+      say(text);
+    }
+    function addNote(text) {
+      notes.insertAdjacentHTML('beforeend', '<li>' + text.replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c])) + '</li>');
+      log.style.display = 'block';
+    }
+    function finishVisit() {
+      const details = [visitor.name && 'visitor: ' + visitor.name, visitor.host && 'meeting: ' + visitor.host, visitor.purpose && 'reason: ' + visitor.purpose].filter(Boolean).join(' · ');
+      addNote(details);
+      respond('Thank you' + (visitor.name ? ', ' + visitor.name : '') + '. I have noted your visit for ' + visitor.host + '. Please take a seat and someone will be with you shortly.');
+    }
+    function reply(messageText) {
+      const clean = messageText.trim();
+      if (!clean) return;
       const lower = clean.toLowerCase();
       transcript.textContent = 'Visitor: ' + clean;
-      if (/\b(hello|hi|morning|afternoon)\b/.test(lower)) return say('Hello. Welcome. How can I help you today?');
-      if (/\b(appointment|meeting|see |here to)\b/.test(lower)) {
-        notes.insertAdjacentHTML('beforeend', '<li>' + clean.replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c])) + '</li>');
-        log.style.display = 'block'; return say('Thank you. I have noted that. Please take a seat and someone will be with you shortly.');
-      }
-      if (/\b(delivery|parcel|package|courier)\b/.test(lower)) return say('Thank you. Please leave the delivery at reception and I will let the team know.');
-      if (/\b(toilet|restroom|bathroom)\b/.test(lower)) return say('The facilities are along the corridor. Please ask a member of staff if you need directions.');
-      notes.insertAdjacentHTML('beforeend', '<li>' + clean.replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c])) + '</li>');
-      log.style.display = 'block';
-      say('Thank you. I have made a note for the reception team. Is there anything else I can help with?');
+      const name = clean.match(/(?:my name is|i am|i'm)\s+([a-z][a-z .'-]{1,40})/i);
+      const host = clean.match(/(?:see|meeting|appointment with|here for)\s+([a-z][a-z .'-]{1,40})/i);
+      if (name) visitor.name = name[1].replace(/\b(today|please)\b.*$/i, '').trim();
+      if (host) visitor.host = host[1].replace(/\b(today|please)\b.*$/i, '').trim();
+      if (/\b(hours|open|close)\b/.test(lower)) return respond('Reception is open Monday to Friday, nine until five.');
+      if (/\b(wi-?fi|internet|wireless)\b/.test(lower)) return respond('Please ask a member of staff for the guest Wi-Fi details.');
+      if (/\b(parking|park|car)\b/.test(lower)) return respond('Visitor parking is available subject to space. Please speak to reception if you need help.');
+      if (/\b(toilet|restroom|bathroom)\b/.test(lower)) return respond('The facilities are along the corridor. Please ask a member of staff if you need directions.');
+      if (/\b(delivery|parcel|package|courier)\b/.test(lower)) { addNote('Delivery: ' + clean); return respond('Thank you. Please leave the delivery at reception and I will let the team know.'); }
+      if (/\b(hello|hi|morning|afternoon)\b/.test(lower) && !visitor.name) return respond('Hello. Welcome. May I take your name, please?');
+      if (visitor.name && !visitor.host) return respond('Nice to meet you, ' + visitor.name + '. Who are you here to see?');
+      if (visitor.host && !visitor.purpose) { visitor.purpose = clean; return finishVisit(); }
+      if (/\b(appointment|meeting|see |here to)\b/.test(lower)) return respond('Of course. May I take your name, please?');
+      visitor.purpose = clean;
+      addNote(clean);
+      respond('Thank you. I have made a note for the reception team. Is there anything else I can help with?');
     }
     async function startListening() {
       try {
@@ -88,6 +113,7 @@
       talk.addEventListener('click', () => listening ? stop() : startListening());
       say('Welcome. Press the button when you are ready to speak to reception.');
     }
+    chat.addEventListener('submit', event => { event.preventDefault(); reply(message.value); message.value = ''; message.focus(); });
   </script>
 </body>
 </html>
